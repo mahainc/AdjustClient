@@ -118,9 +118,107 @@ extension AdjustClient {
     }
 }
 
-// MARK: - Backward-compatibility shims (delete once consumers migrate)
+extension AdjustClient {
+    /// Auto-renewable IAP subscription event. Mirrors `ADJAppStoreSubscription` —
+    /// passed to `trackSubscription(_:)` to forward subscription revenue to Adjust.
+    public struct Subscription: Sendable, Equatable {
+        public let price: Decimal
+        public let currency: String
+        public let transactionId: String
+        public let transactionDate: Date?
+        public let salesRegion: String?
+        public let callbackParameters: [String: String]
+        public let partnerParameters: [String: String]
 
-public typealias AdjustEnvironment = AdjustClient.Environment
-public typealias AdjustLogLevel = AdjustClient.LogLevel
-public typealias AdjustConfig = AdjustClient.Config
-public typealias AdjustRevenue = AdjustClient.Revenue
+        public init(
+            price: Decimal,
+            currency: String,
+            transactionId: String,
+            transactionDate: Date? = nil,
+            salesRegion: String? = nil,
+            callbackParameters: [String: String] = [:],
+            partnerParameters: [String: String] = [:]
+        ) {
+            self.price = price
+            self.currency = currency
+            self.transactionId = transactionId
+            self.transactionDate = transactionDate
+            self.salesRegion = salesRegion
+            self.callbackParameters = callbackParameters
+            self.partnerParameters = partnerParameters
+        }
+    }
+}
+
+extension AdjustClient {
+    /// IAP purchase to verify (and optionally track) via Adjust's receipt-validation
+    /// backend. Mirrors `ADJAppStorePurchase`.
+    public struct Purchase: Sendable, Equatable {
+        public let productId: String
+        public let transactionId: String
+
+        public init(productId: String, transactionId: String) {
+            self.productId = productId
+            self.transactionId = transactionId
+        }
+    }
+}
+
+extension AdjustClient {
+    /// Result returned by `verifyAndTrackPurchase`. Mirrors `ADJPurchaseVerificationResult`.
+    public struct PurchaseVerification: Sendable, Equatable {
+        public enum Status: String, Sendable, Equatable {
+            case success
+            case failure
+            case unknown
+            case notVerified
+
+            public init(rawAdjustValue: String?) {
+                switch rawAdjustValue {
+                case "success":      self = .success
+                case "failure":      self = .failure
+                case "not_verified": self = .notVerified
+                default:             self = .unknown
+                }
+            }
+        }
+
+        public let status: Status
+        public let code: Int
+        public let message: String?
+
+        public init(status: Status, code: Int, message: String?) {
+            self.status = status
+            self.code = code
+            self.message = message
+        }
+    }
+}
+
+extension AdjustClient {
+    /// Granular third-party-sharing settings for `setThirdPartySharing(_:)`.
+    /// Mirrors `ADJThirdPartySharing` — used to opt in/out of CCPA-class data
+    /// sharing globally or per partner.
+    ///
+    /// - `isEnabled` — `nil` lets the server decide; `false` disables sharing
+    ///   entirely; `true` enables it.
+    /// - `granularOptions` — `[partnerName: [key: value]]`, e.g.
+    ///   `["facebook": ["consent": "granted"]]`.
+    /// - `partnerSharingSettings` — `[partnerName: [setting: bool]]`, e.g.
+    ///   `["snapchat": ["everything": false]]`.
+    public struct ThirdPartySharing: Sendable, Equatable {
+        public let isEnabled: Bool?
+        public let granularOptions: [String: [String: String]]
+        public let partnerSharingSettings: [String: [String: Bool]]
+
+        public init(
+            isEnabled: Bool? = nil,
+            granularOptions: [String: [String: String]] = [:],
+            partnerSharingSettings: [String: [String: Bool]] = [:]
+        ) {
+            self.isEnabled = isEnabled
+            self.granularOptions = granularOptions
+            self.partnerSharingSettings = partnerSharingSettings
+        }
+    }
+}
