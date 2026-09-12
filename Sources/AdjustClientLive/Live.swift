@@ -4,7 +4,15 @@ import Dependencies
 import Foundation
 
 extension AdjustClient: DependencyKey {
-    public static var liveValue: Self {
+    /// `static let`, not a computed `var`: `AdjustState` holds the one-shot init gate and
+    /// the queue of calls made before the SDK is up. A fresh state per evaluation would
+    /// re-open the gate and strand whatever is already queued.
+    public static let liveValue: Self = live()
+
+    /// - Parameter funnelSettings: Environment and revenue event token for the FunnelClient
+    ///   ports. Bound here because `Attribution.Providing.configure(token:)` carries only the
+    ///   app token.
+    public static func live(funnelSettings: FunnelSettings = FunnelSettings()) -> Self {
         let state = AdjustState()
         return .init(
             initialize: { config in
@@ -229,7 +237,8 @@ extension AdjustClient: DependencyKey {
             },
             deeplinkStream: {
                 AdjustDelegateBridge.shared.deeplinkActor.stream()
-            }
+            },
+            funnelSettings: { funnelSettings }
         )
     }
 }

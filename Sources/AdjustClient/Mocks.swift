@@ -31,6 +31,7 @@ extension AdjustClient {
         setThirdPartySharing: { _ in },
         setMeasurementConsent: { _ in },
         attributionStream: { .finished },
-        deeplinkStream: { .finished }
+        deeplinkStream: { .finished },
+        funnelSettings: { FunnelSettings() }
     )
 }

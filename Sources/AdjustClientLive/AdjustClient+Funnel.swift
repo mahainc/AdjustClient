@@ -4,72 +4,47 @@ import Foundation
 import FunnelClient
 import LogClient
 
-/// Serves FunnelClient's three marketing-side ports from one `AdjustClient`.
+/// Serves FunnelClient's three marketing-side ports from `AdjustClient` itself.
 ///
-/// One object for three ports because they share one SDK instance, one init gate
-/// and one revenue event token — three objects would each have to re-derive the
-/// same configuration and race each other to initialise the SDK.
+/// One type for three ports because they share one SDK instance, one init gate and one
+/// revenue event token — three separate conformers would each re-derive the same
+/// configuration and race each other to initialise the SDK. Putting the conformance on the
+/// client means a host reaches all three through the dependency key it already has:
+/// `@Dependency(\.adjustClient)`.
 ///
-/// Everything FunnelClient-specific lives here, not in `AdjustClient`: which funnel
-/// event names are ad revenue, which purchase kinds may be booked as subscriptions,
-/// and which parameters travel with a purchase.
-public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
+/// Everything FunnelClient-specific lives here, not in the client's own API: which funnel
+/// event names are ad revenue, which purchase kinds may be booked as subscriptions, and
+/// which parameters travel with a purchase.
+extension AdjustClient: FunnelClient.Attribution.Providing,
     FunnelClient.MarketingEvent.Providing,
     FunnelClient.IAPRevenue.Providing
 {
-    public struct Settings: Sendable {
-        public let environment: AdjustClient.Environment
-        /// Adjust event token every revenue event is reported under. Empty → revenue
-        /// that is not an ad impression is dropped, because Adjust rejects a funnel
-        /// event name used as an event token.
-        public let revenueEventToken: String
-
-        public init(
-            environment: AdjustClient.Environment = .production,
-            revenueEventToken: String = ""
-        ) {
-            self.environment = environment
-            self.revenueEventToken = revenueEventToken
-        }
-    }
-
-    private let adjustClient: AdjustClient
-    private let settings: Settings
-
-    public init(
-        adjustClient: AdjustClient,
-        settings: Settings = Settings()
-    ) {
-        self.adjustClient = adjustClient
-        self.settings = settings
-    }
-
     // MARK: - Attribution.Providing
 
     public func configure(token: String) {
         @Dependency(\.logClient) var log
         if token.isEmpty {
             log.funnel.attribution.notice(
-                "Adjust configure SKIPPED empty token — SDK stays uninitialized, queued calls drained env=\(settings.environment)"
+                "Adjust configure SKIPPED empty token — SDK stays uninitialized, queued calls drained env=\(funnelSettings().environment)"
             )
         } else {
-            log.funnel.attribution.info("Adjust configure env=\(settings.environment)")
+            log.funnel.attribution.info("Adjust configure env=\(funnelSettings().environment)")
         }
         // Ad revenue is reported once, as ADJAdRevenue: the mirror event stays off so
         // Adjust does not count the same impression twice.
         let config = AdjustClient.Config(
             appToken: token,
-            environment: settings.environment,
+            environment: funnelSettings().environment,
             logLevel: Self.logLevel
         )
-        Task { [adjustClient] in await adjustClient.initialize(config) }
+        Task { await self.initialize(config) }
     }
 
     public func attributionStream() -> AsyncStream<FunnelClient.Attribution.Install> {
         let (stream, continuation) = AsyncStream<FunnelClient.Attribution.Install>.makeStream()
-        let task = Task { [adjustClient] in
+        let task = Task {
             @Dependency(\.logClient) var log
-            for await attribution in adjustClient.attributionStream() {
+            for await attribution in self.attributionStream() {
                 let install = Self.install(from: attribution)
                 log.funnel.attribution.info(
                     "Adjust attribution changed network=\(install.network ?? "nil") campaign=\(install.campaign ?? "nil") tracker=\(install.trackerName ?? "nil")"
@@ -104,7 +79,7 @@ public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
         }
         if AdImpressionEvent.matches(name) {
             trackAdRevenue(name: name, params: params, revenue: revenue)
-        } else if !settings.revenueEventToken.isEmpty {
+        } else if !funnelSettings().revenueEventToken.isEmpty {
             trackRevenueEvent(name: name, params: params, revenue: revenue)
         } else {
             log.funnel.attribution.notice(
@@ -148,7 +123,7 @@ public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
             placement: "",
             callbackParameters: params
         )
-        Task { [adjustClient] in await adjustClient.trackRevenue(adRevenue) }
+        Task { await self.trackRevenue(adRevenue) }
     }
 
     private func trackRevenueEvent(
@@ -157,7 +132,7 @@ public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
         revenue: FunnelClient.MarketingEvent.Revenue
     ) {
         @Dependency(\.logClient) var log
-        let token = settings.revenueEventToken
+        let token = funnelSettings().revenueEventToken
         log.funnel.attribution.info(
             "Adjust trackEvent revenue name=\(name) eventToken=\(token) amount=\(revenue.amount) \(revenue.currency)"
         )
@@ -167,7 +142,7 @@ public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
             currency: revenue.currency,
             partnerParameters: params
         )
-        Task { [adjustClient] in await adjustClient.trackRevenueEvent(event) }
+        Task { await self.trackRevenueEvent(event) }
     }
 
     // MARK: - Purchase routing
@@ -188,12 +163,12 @@ public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
         log.funnel.attribution.info(
             "Adjust trackAppStoreSubscription kind=\(event.kind.rawValue) product=\(event.productID) amount=\(event.amount) \(event.currency)"
         )
-        Task { [adjustClient] in await adjustClient.trackSubscription(subscription) }
+        Task { await self.trackSubscription(subscription) }
     }
 
     private func trackPurchaseEvent(_ event: FunnelClient.IAPRevenue.Event) {
         @Dependency(\.logClient) var log
-        let token = settings.revenueEventToken
+        let token = funnelSettings().revenueEventToken
         guard !token.isEmpty else {
             log.funnel.attribution.notice(
                 "Adjust IAP revenue DROPPED product=\(event.productID) kind=\(event.kind.rawValue) — no revenueEventToken configured amount=\(event.amount) \(event.currency)"
@@ -211,7 +186,7 @@ public final class AdjustFunnelProvider: FunnelClient.Attribution.Providing,
         log.funnel.attribution.info(
             "Adjust trackEvent IAP kind=\(event.kind.rawValue) product=\(event.productID) eventToken=\(token) amount=\(event.amount) \(event.currency)"
         )
-        Task { [adjustClient] in await adjustClient.trackRevenueEvent(purchase) }
+        Task { await self.trackRevenueEvent(purchase) }
     }
 
     // MARK: - Mapping

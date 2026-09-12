@@ -76,4 +76,12 @@ public struct AdjustClient: Sendable {
     /// (e.g. deep-link into SubscriptionFeature). Regular (warm) deep links
     /// should continue to flow through `UIScene.openURLContexts`.
     public var deeplinkStream: @Sendable () -> AsyncStream<URL> = { .finished }
+
+    /// What the FunnelClient conformance needs that the ports themselves do not carry.
+    ///
+    /// `Attribution.Providing.configure(token:)` hands over only the app token, but the SDK
+    /// also needs the environment, and revenue events need a token to be booked under. Those
+    /// are host decisions, so they are bound when the live client is built rather than
+    /// rediscovered on every call.
+    public var funnelSettings: @Sendable () -> FunnelSettings = { FunnelSettings() }
 }

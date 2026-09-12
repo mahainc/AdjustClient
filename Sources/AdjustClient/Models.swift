@@ -19,6 +19,23 @@ extension AdjustClient {
 }
 
 extension AdjustClient {
+    /// Host-supplied values the FunnelClient ports need but do not carry.
+    public struct FunnelSettings: Sendable, Equatable {
+        public let environment: Environment
+        /// Adjust event token every revenue event is reported under. Empty → revenue that is
+        /// not an ad impression is dropped, because Adjust rejects a funnel event name used
+        /// as an event token.
+        public let revenueEventToken: String
+
+        public init(
+            environment: Environment = .production,
+            revenueEventToken: String = ""
+        ) {
+            self.environment = environment
+            self.revenueEventToken = revenueEventToken
+        }
+    }
+
     public struct Config: Sendable, Equatable {
         public let appToken: String
         public let environment: Environment
