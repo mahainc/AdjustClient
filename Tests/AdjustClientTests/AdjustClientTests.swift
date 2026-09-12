@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import AdjustClient
 
 @Suite("AdjustClient")
@@ -19,9 +20,44 @@ struct AdjustClientTests {
         #expect(config.revenueEventToken == "rev_token")
     }
 
+    @Test("Config does not mirror ad revenue as an event unless asked")
+    func configAdRevenueMirrorIsOptIn() {
+        let config = AdjustClient.Config(appToken: "abc", environment: .production)
+        #expect(config.mirrorsAdRevenueAsEvent == false)
+    }
+
+    @Test("RevenueEvent defaults — no IAP identifiers, no params")
+    func revenueEventDefaults() {
+        let event = AdjustClient.RevenueEvent(eventToken: "ev", amount: 1, currency: "USD")
+        #expect(event.productId == nil)
+        #expect(event.transactionId == nil)
+        #expect(event.callbackParameters.isEmpty)
+        #expect(event.partnerParameters.isEmpty)
+    }
+
+    @Test("RevenueEvent carries IAP identifiers and both param bags")
+    func revenueEventFields() {
+        let event = AdjustClient.RevenueEvent(
+            eventToken: "ev",
+            amount: Decimal(string: "4.99")!,
+            currency: "USD",
+            productId: "credits.50",
+            transactionId: "tx-7",
+            callbackParameters: ["k": "v"],
+            partnerParameters: ["product_type": "consumable"]
+        )
+        #expect(event.amount == Decimal(string: "4.99"))
+        #expect(event.productId == "credits.50")
+        #expect(event.transactionId == "tx-7")
+        #expect(event.callbackParameters == ["k": "v"])
+        #expect(event.partnerParameters == ["product_type": "consumable"])
+    }
+
     @Test("Revenue has sensible defaults")
     func revenueDefaults() {
         let rev = AdjustClient.Revenue(amount: 0.01, currency: "USD", adUnit: "interstitial")
+        #expect(rev.callbackParameters.isEmpty)
+        #expect(rev.partnerParameters.isEmpty)
         #expect(rev.network == "AdMob")
         #expect(rev.source == "admob_sdk")
         #expect(rev.placement == "default")
@@ -105,6 +141,9 @@ struct AdjustClientTests {
         let resolved = await client.resolveDeeplink(URL(string: "adjust://x")!, nil)
         #expect(resolved == nil)
         await client.trackSubscription(AdjustClient.Subscription(price: 1, currency: "USD", transactionId: "tx"))
+        await client.trackRevenueEvent(
+            AdjustClient.RevenueEvent(eventToken: "ev", amount: 1, currency: "USD")
+        )
         let verif = await client.verifyAndTrackPurchase(
             "ev_token",
             AdjustClient.Purchase(productId: "p", transactionId: "tx"),
@@ -126,12 +165,10 @@ struct AdjustClientTests {
             func record(_ r: AdjustClient.Revenue) { last = r }
         }
         let spy = Spy()
-        let client = AdjustClient(
-            initialize: { _ in },
-            trackEvent: { _, _ in },
-            trackRevenue: { await spy.record($0) },
-            setDeviceToken: { _ in }
-        )
+        // `@DependencyClient` synthesises one all-or-nothing initializer, so a partial
+        // client is built by overriding the single endpoint under test on `noop`.
+        var client = AdjustClient.noop
+        client.trackRevenue = { await spy.record($0) }
         let rev = AdjustClient.Revenue(amount: 0.005, currency: "USD", adUnit: "rewarded")
         await client.trackRevenue(rev)
         let captured = await spy.last

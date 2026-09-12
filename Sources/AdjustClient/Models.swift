@@ -23,19 +23,25 @@ extension AdjustClient {
         public let appToken: String
         public let environment: Environment
         public let logLevel: LogLevel
-        /// Adjust event token used when forwarding ad-revenue events. `nil` → skip.
+        /// Adjust event token used to mirror ad revenue as a plain event. `nil` → skip.
         public let revenueEventToken: String?
+        /// Opt in to sending an extra `ADJEvent` alongside every `ADJAdRevenue`
+        /// record, using `revenueEventToken`. Off by default: Adjust counts both,
+        /// so leaving it on double-counts ad revenue in every report.
+        public let mirrorsAdRevenueAsEvent: Bool
 
         public init(
             appToken: String,
             environment: Environment,
             logLevel: LogLevel = .info,
-            revenueEventToken: String? = nil
+            revenueEventToken: String? = nil,
+            mirrorsAdRevenueAsEvent: Bool = false
         ) {
             self.appToken = appToken
             self.environment = environment
             self.logLevel = logLevel
             self.revenueEventToken = revenueEventToken
+            self.mirrorsAdRevenueAsEvent = mirrorsAdRevenueAsEvent
         }
     }
 }
@@ -51,6 +57,10 @@ extension AdjustClient {
         public let source: String
         public let placement: String
         public let impressions: Int
+        /// Forwarded to Adjust's own callback URL — safe for arbitrary keys.
+        public let callbackParameters: [String: String]
+        /// Forwarded to Adjust's ad-network partners — subject to partner allow-lists.
+        public let partnerParameters: [String: String]
 
         public init(
             amount: Double,
@@ -59,7 +69,9 @@ extension AdjustClient {
             network: String = "AdMob",
             source: String = "admob_sdk",
             placement: String = "default",
-            impressions: Int = 1
+            impressions: Int = 1,
+            callbackParameters: [String: String] = [:],
+            partnerParameters: [String: String] = [:]
         ) {
             self.amount = amount
             self.currency = currency
@@ -68,6 +80,47 @@ extension AdjustClient {
             self.source = source
             self.placement = placement
             self.impressions = impressions
+            self.callbackParameters = callbackParameters
+            self.partnerParameters = partnerParameters
+        }
+    }
+}
+
+extension AdjustClient {
+    /// A plain `ADJEvent` that carries revenue, sent through `trackRevenueEvent(_:)`.
+    ///
+    /// It is the third revenue shape, distinct from its two neighbours on purpose:
+    /// `trackSubscription(_:)` books recurring revenue via `ADJAppStoreSubscription`,
+    /// and `verifyAndTrackPurchase(...)` runs Adjust's receipt validation before the
+    /// event goes out. This one just sends the event — use it for one-off purchases
+    /// and for revenue events that are neither ad revenue nor a subscription.
+    public struct RevenueEvent: Sendable, Equatable {
+        public let eventToken: String
+        public let amount: Decimal
+        public let currency: String
+        /// App Store product identifier, when the event describes a purchase.
+        public let productId: String?
+        /// App Store transaction identifier, when the event describes a purchase.
+        public let transactionId: String?
+        public let callbackParameters: [String: String]
+        public let partnerParameters: [String: String]
+
+        public init(
+            eventToken: String,
+            amount: Decimal,
+            currency: String,
+            productId: String? = nil,
+            transactionId: String? = nil,
+            callbackParameters: [String: String] = [:],
+            partnerParameters: [String: String] = [:]
+        ) {
+            self.eventToken = eventToken
+            self.amount = amount
+            self.currency = currency
+            self.productId = productId
+            self.transactionId = transactionId
+            self.callbackParameters = callbackParameters
+            self.partnerParameters = partnerParameters
         }
     }
 }
@@ -75,7 +128,7 @@ extension AdjustClient {
 extension AdjustClient {
     /// Install-attribution payload emitted by Adjust's `adjustAttributionChanged(_:)`
     /// delegate callback. Cross-SDK-neutral — consumers fan this into analytics
-    /// (e.g. `AnalyticClient.setUserProperty("acquisition_source", attr.network)`)
+    /// (e.g. `AnalyticsClient.setUserProperty("acquisition_source", attr.network)`)
     /// without importing `AdjustSdk`.
     ///
     /// All fields mirror `ADJAttribution` one-to-one and are optional because
@@ -157,7 +210,10 @@ extension AdjustClient {
         public let productId: String
         public let transactionId: String
 
-        public init(productId: String, transactionId: String) {
+        public init(
+            productId: String,
+            transactionId: String
+        ) {
             self.productId = productId
             self.transactionId = transactionId
         }
@@ -175,10 +231,10 @@ extension AdjustClient {
 
             public init(rawAdjustValue: String?) {
                 switch rawAdjustValue {
-                case "success":      self = .success
-                case "failure":      self = .failure
-                case "not_verified": self = .notVerified
-                default:             self = .unknown
+                    case "success": self = .success
+                    case "failure": self = .failure
+                    case "not_verified": self = .notVerified
+                    default: self = .unknown
                 }
             }
         }
@@ -187,7 +243,11 @@ extension AdjustClient {
         public let code: Int
         public let message: String?
 
-        public init(status: Status, code: Int, message: String?) {
+        public init(
+            status: Status,
+            code: Int,
+            message: String?
+        ) {
             self.status = status
             self.code = code
             self.message = message

@@ -44,7 +44,7 @@ Adjust.initSdk → first session sent → attribution callback (within a few sec
 [ongoing] trackEvent / trackRevenue / trackSubscription / processDeeplink
    │
    ▼
-attributionStream() emits → fan into AnalyticClient (see §7)
+attributionStream() emits → fan into AnalyticsClient (see §7)
 ```
 
 All `track*` and `process*` calls made **before** `initialize()` are queued by an internal

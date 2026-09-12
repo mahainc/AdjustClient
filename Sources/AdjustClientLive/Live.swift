@@ -1,6 +1,6 @@
-import Dependencies
 import AdjustClient
 @preconcurrency import AdjustSdk
+import Dependencies
 import Foundation
 
 extension AdjustClient: DependencyKey {
@@ -26,17 +26,29 @@ extension AdjustClient: DependencyKey {
                     adRevenue?.setRevenue(revenue.amount, currency: revenue.currency)
                     adRevenue?.setAdImpressionsCount(Int32(revenue.impressions))
                     adRevenue?.setAdRevenueNetwork(revenue.network)
-                    adRevenue?.setAdRevenueUnit(revenue.adUnit)
-                    adRevenue?.setAdRevenuePlacement(revenue.placement)
+                    if !revenue.adUnit.isEmpty {
+                        adRevenue?.setAdRevenueUnit(revenue.adUnit)
+                    }
+                    if !revenue.placement.isEmpty {
+                        adRevenue?.setAdRevenuePlacement(revenue.placement)
+                    }
+                    for (key, value) in revenue.callbackParameters {
+                        adRevenue?.addCallbackParameter(key, value: value)
+                    }
+                    for (key, value) in revenue.partnerParameters {
+                        adRevenue?.addPartnerParameter(key, value: value)
+                    }
                     if let adRevenue {
                         Adjust.trackAdRevenue(adRevenue)
                     }
 
-                    if let token = config?.revenueEventToken, !token.isEmpty {
-                        let event = ADJEvent(eventToken: token)
-                        event?.setRevenue(revenue.amount, currency: revenue.currency)
-                        Adjust.trackEvent(event)
-                    }
+                    guard config?.mirrorsAdRevenueAsEvent == true,
+                        let token = config?.revenueEventToken,
+                        !token.isEmpty
+                    else { return }
+                    let event = ADJEvent(eventToken: token)
+                    event?.setRevenue(revenue.amount, currency: revenue.currency)
+                    Adjust.trackEvent(event)
                 }
             },
             setDeviceToken: { data in
@@ -74,11 +86,13 @@ extension AdjustClient: DependencyKey {
             trackSubscription: { subscription in
                 await state.perform { _ in
                     let price = NSDecimalNumber(decimal: subscription.price)
-                    guard let adjSub = ADJAppStoreSubscription(
-                        price: price,
-                        currency: subscription.currency,
-                        transactionId: subscription.transactionId
-                    ) else { return }
+                    guard
+                        let adjSub = ADJAppStoreSubscription(
+                            price: price,
+                            currency: subscription.currency,
+                            transactionId: subscription.transactionId
+                        )
+                    else { return }
                     if let date = subscription.transactionDate {
                         adjSub.setTransactionDate(date)
                     }
@@ -94,24 +108,51 @@ extension AdjustClient: DependencyKey {
                     Adjust.trackAppStoreSubscription(adjSub)
                 }
             },
+            trackRevenueEvent: { event in
+                guard !event.eventToken.isEmpty else { return }
+                await state.perform { config in
+                    guard config != nil, let adjEvent = ADJEvent(eventToken: event.eventToken) else { return }
+                    adjEvent.setRevenue(
+                        NSDecimalNumber(decimal: event.amount).doubleValue,
+                        currency: event.currency
+                    )
+                    if let productId = event.productId {
+                        adjEvent.setProductId(productId)
+                    }
+                    if let transactionId = event.transactionId {
+                        adjEvent.setTransactionId(transactionId)
+                    }
+                    for (key, value) in event.callbackParameters {
+                        adjEvent.addCallbackParameter(key, value: value)
+                    }
+                    for (key, value) in event.partnerParameters {
+                        adjEvent.addPartnerParameter(key, value: value)
+                    }
+                    Adjust.trackEvent(adjEvent)
+                }
+            },
             verifyAndTrackPurchase: { token, purchase, revenue in
                 await withCheckedContinuation { (continuation: CheckedContinuation<PurchaseVerification, Never>) in
                     Task {
                         await state.perform { config in
                             guard config != nil else {
-                                continuation.resume(returning: PurchaseVerification(
-                                    status: .notVerified,
-                                    code: -1,
-                                    message: "Adjust SDK not initialized"
-                                ))
+                                continuation.resume(
+                                    returning: PurchaseVerification(
+                                        status: .notVerified,
+                                        code: -1,
+                                        message: "Adjust SDK not initialized"
+                                    )
+                                )
                                 return
                             }
                             guard !token.isEmpty, let event = ADJEvent(eventToken: token) else {
-                                continuation.resume(returning: PurchaseVerification(
-                                    status: .notVerified,
-                                    code: -1,
-                                    message: "Invalid event token"
-                                ))
+                                continuation.resume(
+                                    returning: PurchaseVerification(
+                                        status: .notVerified,
+                                        code: -1,
+                                        message: "Invalid event token"
+                                    )
+                                )
                                 return
                             }
                             event.setTransactionId(purchase.transactionId)
@@ -120,11 +161,13 @@ extension AdjustClient: DependencyKey {
                                 event.setRevenue(revenue.amount, currency: revenue.currency)
                             }
                             Adjust.verifyAndTrackAppStorePurchase(event) { result in
-                                continuation.resume(returning: PurchaseVerification(
-                                    status: PurchaseVerification.Status(rawAdjustValue: result.verificationStatus),
-                                    code: Int(result.code),
-                                    message: result.message
-                                ))
+                                continuation.resume(
+                                    returning: PurchaseVerification(
+                                        status: PurchaseVerification.Status(rawAdjustValue: result.verificationStatus),
+                                        code: Int(result.code),
+                                        message: result.message
+                                    )
+                                )
                             }
                         }
                     }
@@ -200,24 +243,33 @@ extension AdjustClient: DependencyKey {
 /// Thunks receive the resolved `Config?` at execution time so
 /// `trackRevenue` can read the current `revenueEventToken` even if the
 /// call was queued before `configure` ran. A `nil` config signals
-/// "init was abandoned (e.g. empty appToken)" so completion-bearing
-/// thunks can resume their continuations with a sentinel rather than
-/// hanging forever.
+/// "the SDK is not running" — init was abandoned (e.g. empty appToken) —
+/// so completion-bearing thunks resume their continuations with a
+/// sentinel rather than hanging forever.
+///
+/// `configure(with:)` runs at most once: Adjust's own SDK does not expect a
+/// second `initSdk`, and once init has been attempted nothing is queued any
+/// more, because nothing would ever drain it.
 private actor AdjustState {
     private var config: AdjustClient.Config?
     private var isInitialized = false
+    private var didAttemptInit = false
     private var pending: [@Sendable (AdjustClient.Config?) -> Void] = []
 
     func configure(with config: AdjustClient.Config) {
+        guard !didAttemptInit else { return }
+        didAttemptInit = true
         self.config = config
 
         guard !config.appToken.isEmpty else {
             #if DEBUG
-            print("[AdjustClient] ⚠️ appToken is empty — skipping Adjust.initSdk (\(pending.count) queued call(s) dropped)")
+            print(
+                "[AdjustClient] ⚠️ appToken is empty — skipping Adjust.initSdk (\(pending.count) queued call(s) dropped)"
+            )
             #endif
             // Drain with nil so completion-bearing thunks can resume their
-            // continuations rather than leak. Fire-and-forget thunks see
-            // nil config and effectively no-op.
+            // continuations rather than leak. Fire-and-forget thunks ignore the
+            // config and reach an uninitialised SDK, which logs and drops them.
             let abandoned = pending
             pending.removeAll()
             for work in abandoned { work(nil) }
@@ -226,8 +278,8 @@ private actor AdjustState {
 
         let env: String
         switch config.environment {
-        case .sandbox:    env = ADJEnvironmentSandbox
-        case .production: env = ADJEnvironmentProduction
+            case .sandbox: env = ADJEnvironmentSandbox
+            case .production: env = ADJEnvironmentProduction
         }
 
         let adjustConfig = ADJConfig(appToken: config.appToken, environment: env)
@@ -252,26 +304,32 @@ private actor AdjustState {
     /// enqueues it. The closure is fired with the current `config` so
     /// callers that depend on it (e.g. `trackRevenue` reading
     /// `revenueEventToken`) see the post-init value. A `nil` config
-    /// argument means init was abandoned — completion-bearing callers
+    /// argument means the SDK is not running — completion-bearing callers
     /// should resume their continuation with a sentinel value.
+    ///
+    /// Work only queues while init is still ahead of us. Once init has been
+    /// attempted and abandoned the queue is never drained again, so queueing
+    /// there would hang every caller awaiting a continuation forever.
     func perform(_ work: @escaping @Sendable (AdjustClient.Config?) -> Void) {
         if isInitialized {
             work(config)
+        } else if didAttemptInit {
+            work(nil)
         } else {
             pending.append(work)
         }
     }
 }
 
-private extension AdjustClient.LogLevel {
-    var adjustValue: ADJLogLevel {
+extension AdjustClient.LogLevel {
+    fileprivate var adjustValue: ADJLogLevel {
         switch self {
-        case .verbose:  return .verbose
-        case .debug:    return .debug
-        case .info:     return .info
-        case .warn:     return .warn
-        case .error:    return .error
-        case .suppress: return .suppress
+            case .verbose: return .verbose
+            case .debug: return .debug
+            case .info: return .info
+            case .warn: return .warn
+            case .error: return .error
+            case .suppress: return .suppress
         }
     }
 }

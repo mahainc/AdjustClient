@@ -3,9 +3,9 @@ import Foundation
 
 @DependencyClient
 public struct AdjustClient: Sendable {
-    public var initialize:     @Sendable (_ config: Config) async -> Void
-    public var trackEvent:     @Sendable (_ token: String, _ params: [String: String]) async -> Void
-    public var trackRevenue:   @Sendable (_ revenue: Revenue) async -> Void
+    public var initialize: @Sendable (_ config: Config) async -> Void
+    public var trackEvent: @Sendable (_ token: String, _ params: [String: String]) async -> Void
+    public var trackRevenue: @Sendable (_ revenue: Revenue) async -> Void
     public var setDeviceToken: @Sendable (_ token: Data) async -> Void
 
     /// Forward an inbound Adjust campaign URL (received via
@@ -23,17 +23,25 @@ public struct AdjustClient: Sendable {
     /// purchase — Adjust dedups by `transactionId` server-side.
     public var trackSubscription: @Sendable (_ subscription: Subscription) async -> Void
 
+    /// Send a plain revenue-bearing `ADJEvent` — no receipt validation, and no
+    /// recurring-revenue booking. Use it for one-off purchases (consumables,
+    /// non-consumables) and for revenue events that are neither ad revenue nor a
+    /// subscription. Reporting a one-off purchase through `trackSubscription(_:)`
+    /// instead would book it as recurring revenue.
+    public var trackRevenueEvent: @Sendable (_ event: RevenueEvent) async -> Void
+
     /// Receipt-validate an IAP via Adjust's anti-fraud backend and, on success,
     /// fire the supplied event token (with optional revenue/currency).
     /// Always returns a `PurchaseVerification` — `.notVerified` means the SDK
     /// or network failed before the backend was reached.
-    public var verifyAndTrackPurchase: @Sendable (
-        _ token: String,
-        _ purchase: Purchase,
-        _ revenue: Revenue?
-    ) async -> PurchaseVerification = { _, _, _ in
-        PurchaseVerification(status: .notVerified, code: -1, message: nil)
-    }
+    public var verifyAndTrackPurchase:
+        @Sendable (
+            _ token: String,
+            _ purchase: Purchase,
+            _ revenue: Revenue?
+        ) async -> PurchaseVerification = { _, _, _ in
+            PurchaseVerification(status: .notVerified, code: -1, message: nil)
+        }
 
     /// Master kill-switch. `false` pauses ALL tracking (sessions, events,
     /// revenue). State persists across launches. Use for user-facing privacy
@@ -57,7 +65,7 @@ public struct AdjustClient: Sendable {
     /// Attribution emitted by Adjust after install. Fires once the SDK
     /// resolves campaign / adgroup / creative / network on the server. The
     /// stream is multicast so a subscriber can fan the result to
-    /// `AnalyticClient.setUserProperty(...)` without coupling this client to
+    /// `AnalyticsClient.setUserProperty(...)` without coupling this client to
     /// analytics. Must be called **after** `initialize(_:)`.
     public var attributionStream: @Sendable () -> AsyncStream<Attribution> = { .finished }
     /// Deferred deep links delivered via Adjust's

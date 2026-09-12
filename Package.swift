@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AdjustClient",
     platforms: [
-        .iOS(.v16)
+        .iOS(.v17)
     ],
     products: [
         .singleTargetLibrary("AdjustClient"),
@@ -14,6 +14,8 @@ let package = Package(
         .package(url: "https://github.com/pointfreeco/swift-dependencies.git", from: "1.9.0"),
         .package(url: "https://github.com/pointfreeco/swift-case-paths.git", from: "1.5.0"),
         .package(url: "https://github.com/adjust/ios_sdk.git", from: "5.0.0"),
+        .package(url: "https://github.com/mahainc/FunnelClient.git", exact: "7.0.0"),
+        .package(url: "https://github.com/mahainc/LogClient.git", from: "0.3.0"),
     ],
     targets: [
         .target(
@@ -31,6 +33,8 @@ let package = Package(
                 .product(name: "DependenciesMacros", package: "swift-dependencies"),
                 .product(name: "CasePaths", package: "swift-case-paths"),
                 .product(name: "AdjustSdk", package: "ios_sdk"),
+                .product(name: "FunnelClient", package: "FunnelClient"),
+                .product(name: "LogClient", package: "LogClient"),
                 "AdjustClient",
             ]
         ),
