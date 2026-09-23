@@ -1,5 +1,5 @@
 {
-  "originHash" : "22f47399bb8320835875b4cd0e1e805d21c0a9e3670e69b4a525e0fabfb66b8c",
+  "originHash" : "eea3039c0d32740d6ac227d96d0094b7768f993db21cc736bd997f4d244ddf7f",
   "pins" : [
     {
       "identity" : "adjust_signature_sdk",
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mahainc/FunnelClient.git",
       "state" : {
-        "revision" : "ee1f0e3c84682e76bc8fa711223471861aa465aa",
-        "version" : "7.2.0"
+        "revision" : "68bfb0484a308d77ec5325d3b6d33febf1bea33d",
+        "version" : "9.0.0"
       }
     },
     {
