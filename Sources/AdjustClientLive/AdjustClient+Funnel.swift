@@ -21,11 +21,11 @@ import LogClient
 /// Everything FunnelClient-specific lives here, not in the client's own API: which funnel
 /// event names are ad revenue, which purchase kinds may be booked as subscriptions, and
 /// which parameters travel with a purchase.
-extension AdjustClient: FunnelClient.Attribution.Providing,
-    FunnelClient.MarketingEvent.Providing,
-    FunnelClient.IAPRevenue.Providing
+extension AdjustClient: FunnelClient.Marketing.Attribution.Providing,
+    FunnelClient.Marketing.MarketingEvent.Providing,
+    FunnelClient.Marketing.IAPRevenue.Providing
 {
-    // MARK: - Attribution.Providing
+    // MARK: - Marketing.Attribution.Providing
 
     public func configure(token: String) {
         @Dependency(\.logClient) var log
@@ -46,8 +46,8 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         Task { await self.initialize(config) }
     }
 
-    public func attributionStream() -> AsyncStream<FunnelClient.Attribution.Install> {
-        let (stream, continuation) = AsyncStream<FunnelClient.Attribution.Install>.makeStream()
+    public func attributionStream() -> AsyncStream<FunnelClient.Marketing.Attribution.Install> {
+        let (stream, continuation) = AsyncStream<FunnelClient.Marketing.Attribution.Install>.makeStream()
         let task = Task {
             @Dependency(\.logClient) var log
             for await attribution in self.attributionStream() {
@@ -63,12 +63,12 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         return stream
     }
 
-    // MARK: - MarketingEvent.Providing
+    // MARK: - Marketing.MarketingEvent.Providing
 
     public func trackEvent(
         _ name: String,
         params: [String: String],
-        revenue: FunnelClient.MarketingEvent.Revenue?
+        revenue: FunnelClient.Marketing.MarketingEvent.Revenue?
     ) {
         @Dependency(\.logClient) var log
         guard !name.isEmpty else {
@@ -94,9 +94,9 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         }
     }
 
-    // MARK: - IAPRevenue.Providing
+    // MARK: - Marketing.IAPRevenue.Providing
 
-    public func trackPurchase(_ event: FunnelClient.IAPRevenue.Event) {
+    public func trackPurchase(_ event: FunnelClient.Marketing.IAPRevenue.Event) {
         switch event.kind {
             // Only a subscription may go out as ADJAppStoreSubscription; a one-off
             // purchase reported that way would be counted as recurring revenue.
@@ -112,7 +112,7 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
     private func trackAdRevenue(
         name: String,
         params: [String: String],
-        revenue: FunnelClient.MarketingEvent.Revenue
+        revenue: FunnelClient.Marketing.MarketingEvent.Revenue
     ) {
         @Dependency(\.logClient) var log
         log.funnel.attribution.info(
@@ -135,7 +135,7 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
     private func trackRevenueEvent(
         name: String,
         params: [String: String],
-        revenue: FunnelClient.MarketingEvent.Revenue
+        revenue: FunnelClient.Marketing.MarketingEvent.Revenue
     ) {
         @Dependency(\.logClient) var log
         let token = funnelSettings().revenueEventToken
@@ -153,7 +153,7 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
 
     // MARK: - Purchase routing
 
-    private func trackSubscription(_ event: FunnelClient.IAPRevenue.Event) {
+    private func trackSubscription(_ event: FunnelClient.Marketing.IAPRevenue.Event) {
         @Dependency(\.logClient) var log
         let params = Self.purchaseParams(event)
         let subscription = AdjustClient.Subscription(
@@ -172,7 +172,7 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         Task { await self.trackSubscription(subscription) }
     }
 
-    private func trackPurchaseEvent(_ event: FunnelClient.IAPRevenue.Event) {
+    private func trackPurchaseEvent(_ event: FunnelClient.Marketing.IAPRevenue.Event) {
         @Dependency(\.logClient) var log
         let token = funnelSettings().revenueEventToken
         guard !token.isEmpty else {
@@ -220,8 +220,10 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         }
     }
 
-    private static func install(from attribution: AdjustClient.Attribution) -> FunnelClient.Attribution.Install {
-        FunnelClient.Attribution.Install(
+    private static func install(from attribution: AdjustClient.Attribution)
+        -> FunnelClient.Marketing.Attribution.Install
+    {
+        FunnelClient.Marketing.Attribution.Install(
             network: attribution.network,
             campaign: attribution.campaign,
             adgroup: attribution.adgroup,
@@ -230,7 +232,7 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         )
     }
 
-    private static func purchaseParams(_ event: FunnelClient.IAPRevenue.Event) -> [String: String] {
+    private static func purchaseParams(_ event: FunnelClient.Marketing.IAPRevenue.Event) -> [String: String] {
         var params: [String: String] = [
             "product_id": event.productID,
             "product_type": event.kind.rawValue,
