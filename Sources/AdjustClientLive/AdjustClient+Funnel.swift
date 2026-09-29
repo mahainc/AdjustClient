@@ -1,3 +1,9 @@
+// The funnel conformer compiles only when the `Funnel` trait is enabled — the
+// trait is what puts FunnelClient and LogClient in the dependency graph at all,
+// so without it this file has no modules to import. Everything it declares,
+// including the private mapping helpers, is reachable only through the three
+// ports, so the whole file goes behind the flag. See Package.swift.
+#if Funnel
 import AdjustClient
 import Dependencies
 import Foundation
@@ -253,3 +259,4 @@ extension AdjustClient: FunnelClient.Attribution.Providing,
         return params
     }
 }
+#endif
